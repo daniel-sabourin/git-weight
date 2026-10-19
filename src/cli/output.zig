@@ -10,6 +10,16 @@ const changed_mod = @import("../analysis/changed.zig");
 const check_mod = @import("../analysis/check.zig");
 const dupes_mod = @import("../analysis/dupes.zig");
 const growth_mod = @import("../analysis/growth.zig");
+const pr_mod = @import("../analysis/pr.zig");
+
+pub fn printPr(w: *std.Io.Writer, r: *const pr_mod.Report) WriteError!void {
+    try w.print("PR complexity: {s} -> {s}\n", .{ r.base, r.to });
+    try w.print("Score {s}: {d} total = {d} work + {d} complexity\n", .{ pr_mod.Report.score_version, r.total_points, r.work_points, r.complexity_points });
+    try w.print("Changed lines: +{d} -{d}; added branches: {d}; files: {d}\n", .{ r.added_lines, r.removed_lines, r.added_branches, r.files });
+    try w.print("Reach: {d} internal imports, {d} external hosts; {d} dependency manifests\n", .{ r.internal_imports, r.external_integrations, r.dependency_changes });
+    try w.print("UI: {d} new, {d} changed shared, {d} reused imports; specialist: {d} crypto, {d} algorithm signals\n", .{ r.new_ui_components, r.changed_shared_ui_components, r.reused_ui_components, r.crypto_signals, r.algorithm_signals });
+    try w.print("Excluded files: {d}; binary files: {d}\n", .{ r.excluded_files, r.binary_files });
+}
 const object_id = @import("../git/object_id.zig");
 
 pub const WriteError = std.Io.Writer.Error;

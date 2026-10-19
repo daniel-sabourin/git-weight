@@ -83,6 +83,7 @@ Commands:
   check        Threshold checks for CI gating (see --max-* options)
   dupes        Duplicate content: identical blobs at multiple paths
   growth       Repository growth by calendar month
+  pr           Score changed source between two commits (PR pre/post merge)
 
 Options:
   --json             Machine-readable JSON output
@@ -221,6 +222,39 @@ fi
 ```
 
 `--base` defaults to `HEAD~1` and `--to` to `HEAD`; both accept ref names, full hex oids, and ancestry suffixes (`~N`, `^N`, e.g. `HEAD~2^1`). Annotated tags are peeled to their commits. With `--json`, each side is reported as `{"ref": ..., "commit": ..., "tree": ...}`, where `tree` holds the subtree or blob oid at the path (null when the path is absent on that side).
+
+### PR complexity (experimental)
+
+`git-weight pr` compares two commit trees directly, without GitHub access or a `git` subprocess. By default, the base is `origin/main` if present, otherwise `main`; the target is `HEAD`. Thus on a checked-out PR branch, `git-weight pr --json` gives a quick score. It does **not** calculate the merge base: if main advanced after the PR branched, pass the actual merge-base SHA with `--base` to avoid counting unrelated main changes. Run it before merge against the saved base and PR-tip SHAs; run it again after merge against the target branch's pre-merge SHA and the landed commit. Save those SHAs in CI because squash/rebase can replace PR commits and deleted branch objects may later be pruned.
+
+```sh
+git-weight pr --base <base-sha> --to <pr-tip-sha> --json
+git-weight pr --base <pre-merge-target-sha> --to <landed-sha> --max-points 500
+```
+
+The report separates *work points* from *observable complexity points*:
+
+```text
+work_points = added source lines + removed source lines
+            + 4 × added branching lines + 3 × changed source files
+complexity_points = 6 × new relative imports + 12 × new URL hosts
+                  + 4 × changed dependency manifests
+                  + 6 × new or changed shared UI components
+                  + 10 × crypto signals + 8 × algorithm signals
+total_points = work_points + complexity_points
+```
+
+The score is versioned (`pr-1`). `--json` writes one compact JSON object per invocation to stdout for line-oriented pipeline logging, including base/target commit hashes, dimensions, and up to 64 evidence entries. `--max-points N` exits 6 when *total_points* exceeds N. Source extensions are listed in `src/analysis/pr.zig`; generated/vendor/build paths and binary files are excluded. Component reuse is reported as context but adds no complexity points.
+
+For historical PRs, supply a UTF-8 tab-separated file with five columns (`pr_id`, `merged_at`, `stage`, `base`, `to`). `stage` is `pre` or `post`; `base` and `to` should be retained full commit SHAs. `merged_at` is an ISO-8601 timestamp supplied by the caller. The first header row is optional. Each record produces one JSON line; missing commits fail explicitly.
+
+```sh
+git-weight pr --input historical-prs.tsv --json > historical-scores.jsonl
+```
+
+Git history does not reliably identify squash-merged PR numbers or reconstruct pruned branch tips; obtain the historical PR-to-commit mapping separately. Run all backfills with the same score version for comparable trend lines.
+
+This is an *uncalibrated change-complexity proxy*, not a measure of engineer productivity or semantic difficulty. Lines are compared as multisets: reordering does not add points, while rewritten lines count as removals plus additions. Internal reach currently means distinct new *relative import statements*, not a resolved call graph. External reach means literal new URL hosts, not verified partner integrations. A changed dependency manifest does not prove a dependency was added; UI component paths do not establish consumer reach. Crypto and algorithm signals are keyword heuristics. The report marks semantic complexity `unknown`; a reviewer should assess whether the observed complexity is justified. Calibrate weights against historical PRs before using thresholds as a merge gate. Files absent from the target tree (deletions) are counted; the score measures changed work, not net codebase complexity.
 
 ### CI gating
 

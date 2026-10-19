@@ -14,6 +14,7 @@ pub const Command = enum {
     check,
     dupes,
     growth,
+    pr,
 };
 
 pub const ParseError = error{
@@ -33,6 +34,8 @@ pub const Options = struct {
     base_ref: ?[]const u8 = null,
     /// Target revision for `changed` (default HEAD).
     to_ref: ?[]const u8 = null,
+    /// TSV records for historical PR scoring.
+    input_file: ?[]const u8 = null,
     /// For `changed`: exit 1 when changed, 0 when unchanged.
     exit_code: bool = false,
     /// For `check`: maximum total .git size in bytes.
@@ -45,6 +48,8 @@ pub const Options = struct {
     max_blob: ?u64 = null,
     /// For `check`: maximum bytes introduced in the most recent month.
     max_growth: ?u64 = null,
+    /// For `pr`: reject total points above this threshold.
+    max_points: ?u64 = null,
     /// For `growth`: show only the last N month buckets.
     months: ?usize = null,
     json: bool = false,
@@ -78,12 +83,13 @@ pub const usage_text =
     \\  check        Threshold checks for CI gating (see --max-* options)
     \\  dupes        Duplicate content: identical blobs at multiple paths
     \\  growth       Repository growth by calendar month
+    \\  pr           Score changed source between two commits (PR pre/post merge)
     \\
     \\Options:
     \\  --json             Machine-readable JSON output
     \\  --limit N          Maximum entries to list (default 20; applies to largest/refs/dupes)
-    \\  --base REF         Base revision for 'changed' (default HEAD~1)
-    \\  --to REF           Target revision for 'changed' (default HEAD)
+    \\  --base REF         Base revision ('pr': origin/main then main; 'changed': HEAD~1)
+    \\  --to REF           Target revision for 'changed' or 'pr' (default HEAD)
     \\  --exit-code        For 'changed': exit 1 when changed, 0 when unchanged
     \\  --min-size SIZE    Only include blobs at least SIZE (e.g. 10MB, 500KiB)
     \\  --months N         For 'growth': show only the last N month buckets
@@ -92,6 +98,8 @@ pub const usage_text =
     \\  --max-unreachable SIZE For 'check': fail if gc-reclaimable bytes exceed SIZE
     \\  --max-blob SIZE    For 'check': fail if the largest blob exceeds SIZE
     \\  --max-growth SIZE  For 'check': fail if the most recent month's new bytes exceed SIZE
+    \\  --max-points N     For 'pr': exit 6 if total points exceed N
+    \\  --input FILE       For 'pr': score historical PRs from TSV records
     \\  --threads N        Worker thread count (default: detected CPU count)
     \\  --current          Only blobs present in the tree at HEAD
     \\  --historical       Only blobs not present in the tree at HEAD
@@ -179,6 +187,10 @@ pub fn parse(argv: []const []const u8) ParseError!Options {
                 i += 1;
                 if (i >= argv.len) return error.InvalidArguments;
                 opts.to_ref = argv[i];
+            } else if (std.mem.eql(u8, arg, "--input")) {
+                i += 1;
+                if (i >= argv.len) return error.InvalidArguments;
+                opts.input_file = argv[i];
             } else if (std.mem.eql(u8, arg, "--limit")) {
                 i += 1;
                 if (i >= argv.len) return error.InvalidArguments;
@@ -207,6 +219,10 @@ pub fn parse(argv: []const []const u8) ParseError!Options {
                 i += 1;
                 if (i >= argv.len) return error.InvalidArguments;
                 opts.max_growth = parseSize(argv[i]) orelse return error.InvalidArguments;
+            } else if (std.mem.eql(u8, arg, "--max-points")) {
+                i += 1;
+                if (i >= argv.len) return error.InvalidArguments;
+                opts.max_points = std.fmt.parseUnsigned(u64, argv[i], 10) catch return error.InvalidArguments;
             } else if (std.mem.eql(u8, arg, "--months")) {
                 i += 1;
                 if (i >= argv.len) return error.InvalidArguments;
@@ -259,6 +275,8 @@ pub fn parse(argv: []const []const u8) ParseError!Options {
         opts.max_growth == null)
         return error.InvalidArguments;
     if (opts.current_only and opts.historical_only) return error.InvalidArguments;
+    if (opts.max_points != null and opts.command != .pr) return error.InvalidArguments;
+    if (opts.input_file != null and (opts.command != .pr or !opts.json or opts.base_ref != null or opts.to_ref != null)) return error.InvalidArguments;
     return opts;
 }
 
@@ -282,7 +300,7 @@ test "parse args" {
     try std.testing.expectEqual(Command.largest, a1.command);
     try std.testing.expect(a1.repo_path == null);
 
-    const a2 = try parse(&.{ "/path/to/repo" });
+    const a2 = try parse(&.{"/path/to/repo"});
     try std.testing.expectEqual(Command.summary, a2.command);
     try std.testing.expectEqualStrings("/path/to/repo", a2.repo_path.?);
 
@@ -315,7 +333,7 @@ test "parse args" {
     try std.testing.expectError(error.InvalidArguments, parse(&.{ "changed", "a", "b" }));
     try std.testing.expectError(error.InvalidArguments, parse(&.{ "changed", "--base" }));
 
-    try std.testing.expectError(error.InvalidArguments, parse(&.{ "--nope" }));
+    try std.testing.expectError(error.InvalidArguments, parse(&.{"--nope"}));
     try std.testing.expectError(error.InvalidArguments, parse(&.{ "largest", "a", "b" }));
     try std.testing.expectError(error.InvalidArguments, parse(&.{ "--current", "--historical" }));
 
@@ -325,8 +343,8 @@ test "parse args" {
     try std.testing.expect(a7.max_historical == null and a7.max_unreachable == null and a7.max_blob == null);
 
     const a8 = try parse(&.{
-        "check",           "--max-size", "100MB", "--max-historical", "10MB",
-        "--max-unreachable", "5MB",     "--max-blob", "1MB",
+        "check",             "--max-size", "100MB",      "--max-historical", "10MB",
+        "--max-unreachable", "5MB",        "--max-blob", "1MB",
     });
     try std.testing.expectEqual(@as(?u64, 100 * 1024 * 1024), a8.max_size);
     try std.testing.expectEqual(@as(?u64, 10 * 1024 * 1024), a8.max_historical);
@@ -352,4 +370,14 @@ test "parse args" {
 
     try std.testing.expectError(error.InvalidArguments, parse(&.{ "growth", "--months" }));
     try std.testing.expectError(error.InvalidArguments, parse(&.{ "check", "--max-growth", "bogus" }));
+}
+
+test "parse PR scoring and historical input" {
+    const current = try parse(&.{ "pr", "--json", "--max-points", "100" });
+    try std.testing.expectEqual(Command.pr, current.command);
+    try std.testing.expectEqual(@as(?u64, 100), current.max_points);
+    const history = try parse(&.{ "pr", "--input", "history.tsv", "--json" });
+    try std.testing.expectEqualStrings("history.tsv", history.input_file.?);
+    try std.testing.expectError(error.InvalidArguments, parse(&.{ "pr", "--input", "history.tsv" }));
+    try std.testing.expectError(error.InvalidArguments, parse(&.{ "pr", "--input", "history.tsv", "--json", "--base", "main" }));
 }
