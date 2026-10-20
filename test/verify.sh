@@ -1170,4 +1170,26 @@ assert after['source_files'] == after['source_lines'] == after['total_points'] =
 print('ok: repo score follows committed active source, not history or worktree')
 PYEOF
 
+# HEAD can point to a branch late in a packed-refs file larger than 4 KiB.
+REPO="$FIXTURES/large-packed-refs"
+mkdir -p "$REPO"
+cd "$REPO"
+git init -q -b zcurrent
+git config user.email test@example.com
+git config user.name Test
+echo 'fn main() {}' > main.rs
+git add main.rs && git commit -qm 'add source'
+for i in $(seq 1 100); do
+    git branch "a-$(printf '%03d' "$i")"
+done
+git pack-refs --all --prune
+"$GW" complexity --json > "$FIXTURES/packed-head-complexity.json"
+python3 - "$FIXTURES/packed-head-complexity.json" "$(git rev-parse HEAD)" <<'PYEOF'
+import json, sys
+report = json.load(open(sys.argv[1]))
+assert report['revision'] == 'HEAD' and report['commit'] == sys.argv[2]
+assert report['source_files'] == 1 and report['total_points'] > 0
+print('ok: default complexity resolves HEAD in large packed-refs')
+PYEOF
+
 echo "ALL INTEGRATION CHECKS PASSED"
