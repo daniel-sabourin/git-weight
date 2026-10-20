@@ -12,6 +12,7 @@ REPOSITORY = "https://github.com/kris-hansen/git-weight"
 NUMBER = r"(?:0|[1-9][0-9]*)"
 IDENTIFIER = rf"(?:{NUMBER}|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
 TAG_PATTERN = re.compile(rf"v({NUMBER}\.{NUMBER}\.{NUMBER}(?:-{IDENTIFIER}(?:\.{IDENTIFIER})*)?)")
+SOURCE_VERSION_PATTERN = re.compile(r'(?m)^(\s*\.version\s*=\s*")([0-9]+\.[0-9]+\.[0-9]+)(",\s*)$')
 
 
 def version_for(tag):
@@ -19,6 +20,23 @@ def version_for(tag):
     if not match:
         raise ValueError("expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-prerelease")
     return match[1]
+
+
+def next_version(source, tags):
+    """Honor an explicit source bump; otherwise advance the latest stable patch."""
+    match = SOURCE_VERSION_PATTERN.search(source)
+    if not match:
+        raise ValueError("build.zig.zon must contain one stable .version")
+    source_version = tuple(map(int, match[2].split(".")))
+    stable_versions = [
+        tuple(map(int, version.split(".")))
+        for tag in tags
+        if (version := version_for(tag)).count(".") == 2 and "-" not in version
+    ]
+    latest = max(stable_versions, default=None)
+    selected = source_version if latest is None or source_version > latest else (latest[0], latest[1], latest[2] + 1)
+    version = ".".join(map(str, selected))
+    return version, source[:match.start(2)] + version + source[match.end(2):]
 
 
 def package(tag, directory):
@@ -88,12 +106,21 @@ def main():
     generate = commands.add_parser("package")
     generate.add_argument("tag")
     generate.add_argument("directory", type=Path)
+    next_release = commands.add_parser("next")
+    next_release.add_argument("manifest", type=Path)
+    next_release.add_argument("tags", nargs="*")
     args = parser.parse_args()
     try:
-        version = version_for(args.tag)
-        if args.command == "validate":
+        if args.command == "next":
+            source = args.manifest.read_text()
+            version, updated = next_version(source, args.tags)
+            args.manifest.write_text(updated)
+            print(f"tag=v{version}\nversion={version}\nprerelease=false")
+        elif args.command == "validate":
+            version = version_for(args.tag)
             print(f"tag={args.tag}\nversion={version}\nprerelease={str('-' in version).lower()}")
         else:
+            version_for(args.tag)
             package(args.tag, args.directory)
     except (ValueError, OSError, tarfile.TarError) as error:
         parser.exit(1, f"release: {error}\n")

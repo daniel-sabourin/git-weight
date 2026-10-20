@@ -3,6 +3,10 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
@@ -20,26 +24,68 @@ permissions:
 
 jobs:
   prepare:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     outputs:
-      tag: ${{ steps.release.outputs.tag }}
-      version: ${{ steps.release.outputs.version }}
-      sha: ${{ steps.release.outputs.sha }}
-      prerelease: ${{ steps.release.outputs.prerelease }}
+      tag: ${{ steps.release.outputs.tag || steps.manual_release.outputs.tag }}
+      version: ${{ steps.release.outputs.version || steps.manual_release.outputs.version }}
+      sha: ${{ steps.release.outputs.sha || steps.manual_release.outputs.sha }}
+      prerelease: ${{ steps.release.outputs.prerelease || steps.manual_release.outputs.prerelease }}
+      ready: ${{ steps.release.outputs.ready || steps.manual_release.outputs.ready }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
           fetch-depth: 0
-          persist-credentials: false
-      - name: Validate and resolve tag
+          persist-credentials: ${{ github.event_name == 'workflow_run' }}
+      - name: Tag successful main build
+        if: github.event_name == 'workflow_run'
         id: release
+        env:
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$TAP_GITHUB_TOKEN" ]; then
+            echo '::error::Set TAP_GITHUB_TOKEN before creating a release tag.'
+            exit 1
+          fi
+          # If another merge landed while CI ran, release that newer merge instead.
+          git fetch origin main --no-tags
+          if [ "$(git rev-parse origin/main)" != "$CI_SHA" ]; then
+            echo 'Main advanced since this CI run; a newer run will release it.'
+            exit 0
+          fi
+          if git tag --points-at "$CI_SHA" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo 'This main commit already has a stable release tag.'
+            exit 0
+          fi
+          python3 scripts/release.py next build.zig.zon $(git tag -l 'v*') > "$RUNNER_TEMP/release-outputs"
+          TAG="$(sed -n 's/^tag=//p' "$RUNNER_TEMP/release-outputs")"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add build.zig.zon
+          if ! git diff --cached --quiet; then
+            git commit -m "Bump git-weight version to ${TAG#v}"
+          fi
+          git tag -a "$TAG" -m "Release $TAG"
+          # Push the version commit and tag together or neither; bot pushes do not
+          # retrigger GitHub Actions, so this run performs the release itself.
+          git push --atomic origin HEAD:main "refs/tags/$TAG"
+          cat "$RUNNER_TEMP/release-outputs" >> "$GITHUB_OUTPUT"
+          printf 'sha=%s\nready=true\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Validate and resolve existing tag
+        if: github.event_name != 'workflow_run'
+        id: manual_release
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           python3 scripts/release.py validate "$TAG" >> "$GITHUB_OUTPUT"
           printf 'sha=%s\n' "$(git rev-parse --verify "refs/tags/$TAG^{commit}")" >> "$GITHUB_OUTPUT"
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
       - name: Check tap credentials for stable releases
-        if: steps.release.outputs.prerelease == 'false'
+        if: (steps.release.outputs.ready == 'true' && steps.release.outputs.prerelease == 'false') || (steps.manual_release.outputs.ready == 'true' && steps.manual_release.outputs.prerelease == 'false')
         env:
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
         run: |
@@ -50,6 +96,7 @@ jobs:
 
   build:
     needs: prepare
+    if: needs.prepare.outputs.ready == 'true'
     uses: ./.github/workflows/build.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
@@ -57,6 +104,7 @@ jobs:
 
   publish:
     needs: [prepare, build]
+    if: needs.prepare.outputs.ready == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -91,7 +139,7 @@ jobs:
 
   homebrew:
     needs: [prepare, publish]
-    if: needs.prepare.outputs.prerelease == 'false'
+    if: needs.prepare.outputs.ready == 'true' && needs.prepare.outputs.prerelease == 'false'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

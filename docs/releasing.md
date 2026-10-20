@@ -27,11 +27,29 @@ GitHub Actions builds Zig binaries directly, since this project does not use Go.
    Comanda's existing secret cannot be read back or copied through GitHub's API.
 
 3. Merge/push the workflow and release scripts to `main`. Ensure GitHub Actions
-   is enabled and the CI workflow passes. No release occurs on a normal branch push.
+   is enabled and the CI workflow passes.
 
-## Publish a version
+## Automatic releases from main
 
-Update `.version` in `build.zig.zon` for source builds, then commit it before tagging:
+After a successful `CI` run on `main`, the `Release` workflow creates a version
+commit and annotated tag, builds all four archives, publishes the GitHub release,
+and updates the Homebrew tap. It uses the next patch version after the latest
+stable tag. To request a minor or major version instead, bump `.version` in
+`build.zig.zon` in the PR; the workflow honors that version when it is newer than
+the latest stable tag. A prerelease tag does not advance the stable version.
+
+The workflow skips an obsolete CI result if `main` advanced during the run, and
+skips a commit that already has a stable tag. The next successful CI run on the
+newer `main` revision releases it. The version commit and tag are pushed
+atomically with `GITHUB_TOKEN`; those bot pushes do not start another workflow.
+The release build still runs its own unit and integration checks before
+publication. Merging this automation PR will trigger the first automatic patch
+release after its `main` CI run passes.
+
+## Manual release / recovery
+
+For a manually chosen tag, update `.version` in `build.zig.zon` for source builds,
+then commit it before tagging:
 
 ```sh
 git tag -a v0.4.0 -m 'Release v0.4.0'
@@ -79,8 +97,12 @@ that job is safe when the formula is already current.
 Publishing intentionally refuses to overwrite an existing release. If uploading
 fails and leaves an unpublished draft, delete that draft before retrying the
 publish job. Do not replace published assets; ship a new version instead.
-Dispatch releases in version order: manually releasing an older stable tag also
+Dispatch manual releases in version order: manually releasing an older stable tag also
 updates the tap to that older version. Only one release workflow runs at a time.
+If the automatic release fails after pushing its tag, rerun the failed jobs or
+dispatch `Release` with that existing tag; do not create a second tag for the
+same code. If the version commit/tag push is rejected because `main` advanced,
+the later CI run will retry from the newer revision.
 
 ## Local validation
 
