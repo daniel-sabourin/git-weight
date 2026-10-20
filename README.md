@@ -84,6 +84,7 @@ Commands:
   dupes        Duplicate content: identical blobs at multiple paths
   growth       Repository growth by calendar month
   pr           Score changed source between two commits (PR pre/post merge)
+  repo         Score active source complexity at a commit (snapshot)
 
 Options:
   --json             Machine-readable JSON output
@@ -93,6 +94,7 @@ Options:
   --threads N        Worker thread count (default: CPU count)
   --base REF         Base revision for 'changed' (default HEAD~1)
   --to REF           Target revision for 'changed' (default HEAD)
+  --rev REF          Snapshot revision for 'repo' (default HEAD)
   --exit-code        For 'changed': exit 1 when changed, 0 when unchanged
   --max-size SIZE    For 'check': fail if total .git size exceeds SIZE
   --max-historical SIZE  For 'check': fail if historical deleted bytes exceed SIZE
@@ -222,6 +224,51 @@ fi
 ```
 
 `--base` defaults to `HEAD~1` and `--to` to `HEAD`; both accept ref names, full hex oids, and ancestry suffixes (`~N`, `^N`, e.g. `HEAD~2^1`). Annotated tags are peeled to their commits. With `--json`, each side is reported as `{"ref": ..., "commit": ..., "tree": ...}`, where `tree` holds the subtree or blob oid at the path (null when the path is absent on that side).
+
+### Repository complexity (experimental)
+
+`git-weight repo` scores the **active source tree at one commit**, not all code
+ever committed. Use `--rev` with a commit or tag to compare snapshots over time:
+
+```sh
+git-weight repo --json
+git-weight repo --rev v0.5.0 --json
+```
+
+The independent `repo-1` score is a stock measure, separate from the PR
+change/work score. It uses the same supported source extensions and
+generated/vendor exclusions as `pr`:
+
+```text
+size_points = active nonblank source lines
+structural_points = 4 × active branch lines + 3 × active source files
+                  + 6 × distinct internal import lines per file
+                  + 12 × distinct URL hosts per file
+                  + 4 × dependency manifests + 6 × UI component files
+                  + 10 × files with crypto keywords + 8 × files with algorithm keywords
+total_points = size_points + structural_points
+points_per_kloc = total_points / active source lines × 1,000 (rounded)
+```
+
+JSON includes the resolved commit and commit timestamp, total and dimension
+counts, and score version. Thus a deleted file stops contributing to future
+snapshots, even though its historical Git objects remain. Compare snapshots
+only with the same score version; show the source-line count and dimension
+breakdown alongside totals when comparing different repositories. This is a
+heuristic inventory, **not** a quality grade: internal imports include relative
+imports, Rust crate imports, and references to the repository's Go module;
+they are not a resolved dependency graph. Literal URL hosts are not confirmed external
+partners; a manifest is not a count of dependencies; and keyword signals do
+not establish that cryptography or a novel algorithm is actually in use.
+The analysis currently counts nonblank lines, including comments, and has
+limited language coverage. `semantic_complexity` is therefore `unknown`.
+
+The PR score stays unchanged. Its change points represent work/churn; the
+difference between two `repo` snapshots is *net retained complexity*, which
+can decrease after a substantial simplifying refactor. If comparing a PR to
+its repository, calculate both repository snapshots at the PR base and tip;
+the change in repo points and its percentage of the base are more meaningful
+than dividing PR work points by the repository's stock score.
 
 ### PR complexity (experimental)
 

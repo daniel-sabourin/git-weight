@@ -20,6 +20,7 @@ const scan_mod = @import("analysis/scan.zig");
 const dupes_mod = @import("analysis/dupes.zig");
 const growth_mod = @import("analysis/growth.zig");
 const pr_mod = @import("analysis/pr.zig");
+const repo_complexity = @import("analysis/repo_complexity.zig");
 
 const ExitCode = u8;
 pub const exit_success: ExitCode = 0;
@@ -87,6 +88,7 @@ comptime {
     _ = @import("analysis/dupes.zig");
     _ = @import("analysis/growth.zig");
     _ = @import("analysis/pr.zig");
+    _ = @import("analysis/repo_complexity.zig");
     _ = @import("platform/mmap.zig");
     _ = @import("platform/filesystem.zig");
 }
@@ -173,7 +175,7 @@ fn run(io: std.Io, allocator: std.mem.Allocator, w: *std.Io.Writer, errw: *std.I
 
     // `changed` resolves only a handful of objects; every other command
     // enumerates the object database, so build the full index up front.
-    if (opts.command != .changed and opts.command != .pr) {
+    if (opts.command != .changed and opts.command != .pr and opts.command != .repo) {
         store.ensureIndexed() catch |err| switch (err) {
             error.OutOfMemory, error.SystemResources => return fail(errw, exit_general, "error: out of memory"),
             error.UnsupportedFormat => return fail(errw, exit_unsupported, "error: unsupported Git format"),
@@ -191,6 +193,18 @@ fn run(io: std.Io, allocator: std.mem.Allocator, w: *std.Io.Writer, errw: *std.I
     }
 
     switch (opts.command) {
+        .repo => {
+            const name = opts.rev_ref orelse "HEAD";
+            const commit = revision.resolve(&store, &refs, name, allocator) catch return fail(errw, exit_invalid_args, "error: cannot resolve snapshot revision");
+            const report = repo_complexity.build(&store, std.heap.page_allocator, name, commit) catch |err| return reportAnalysisError(errw, err);
+            if (opts.json) {
+                var jw: json.JsonWriter = .{ .w = w, .compact = true };
+                json.printRepoComplexity(&jw, &report) catch return exit_general;
+                w.writeByte('\n') catch return exit_general;
+            } else {
+                output.printRepoComplexity(w, &report) catch return exit_general;
+            }
+        },
         .pr => {
             if (opts.input_file) |input_file| {
                 const data = std.Io.Dir.cwd().readFileAlloc(io, input_file, allocator, std.Io.Limit.limited(32 * 1024 * 1024)) catch return fail(errw, exit_general, "error: cannot read PR input file");

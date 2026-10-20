@@ -11,6 +11,17 @@ const check_mod = @import("../analysis/check.zig");
 const dupes_mod = @import("../analysis/dupes.zig");
 const growth_mod = @import("../analysis/growth.zig");
 const pr_mod = @import("../analysis/pr.zig");
+const repo_complexity = @import("../analysis/repo_complexity.zig");
+
+pub fn printRepoComplexity(w: *std.Io.Writer, r: *const repo_complexity.Report) WriteError!void {
+    var commit_hex: [64]u8 = undefined;
+    try w.print("Repository complexity at {s} ({s})\n", .{ r.revision, r.commit.hex(&commit_hex) });
+    try w.print("Score {s}: {d} total = {d} size + {d} structural ({d} points/1,000 source lines)\n", .{ repo_complexity.Report.score_version, r.total_points, r.size_points, r.structural_points, r.points_per_kloc });
+    try w.print("Active source: {d} files, {d} nonblank lines, {d} branch lines\n", .{ r.source_files, r.source_lines, r.branch_lines });
+    try w.print("Coupling: {d} relative imports, {d} external host references; {d} dependency manifests\n", .{ r.internal_imports, r.external_host_references, r.dependency_manifests });
+    try w.print("UI components: {d}; specialist signals: {d} crypto files, {d} algorithm files\n", .{ r.ui_components, r.crypto_files, r.algorithm_files });
+    try w.print("Excluded files: {d}; binary files: {d}\n", .{ r.excluded_files, r.binary_files });
+}
 
 pub fn printPr(w: *std.Io.Writer, r: *const pr_mod.Report) WriteError!void {
     try w.print("PR complexity: {s} -> {s}\n", .{ r.base, r.to });
