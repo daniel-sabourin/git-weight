@@ -73,12 +73,26 @@ pub fn readAll(allocator: std.mem.Allocator, repo: *const Repository) RefError!R
 
     // HEAD last.
     const head_path = std.fmt.bufPrint(&buf, "{s}/HEAD", .{repo.git_dir}) catch return error.Unexpected;
-    if (readRefFile(head_path)) |target| {
+    if (readHead(head_path, &refs)) |target| {
         const name = try allocator.dupe(u8, "HEAD");
         try refs.refs.append(allocator, .{ .name = name, .target = target });
     }
 
     return refs;
+}
+
+/// Resolve HEAD against the refs we already collected. Reading packed-refs
+/// into a fixed buffer can miss a branch that sorts late in a large file.
+fn readHead(path: []const u8, refs: *const Refs) ?object_id.ObjectId {
+    var fbuf: [4096]u8 = undefined;
+    const data = std.Io.Dir.cwd().readFile(io(), path, &fbuf) catch return null;
+    const trimmed = std.mem.trimEnd(u8, data, " \r\n");
+    if (!std.mem.startsWith(u8, trimmed, "ref:")) return parseOidHex(trimmed);
+    const target_name = std.mem.trim(u8, trimmed[4..], " \t");
+    for (refs.refs.items) |ref| {
+        if (std.mem.eql(u8, ref.name, target_name)) return ref.target;
+    }
+    return null;
 }
 
 fn readRefFile(path: []const u8) ?object_id.ObjectId {
