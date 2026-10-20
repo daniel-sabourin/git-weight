@@ -19,6 +19,7 @@ const check_mod = @import("analysis/check.zig");
 const scan_mod = @import("analysis/scan.zig");
 const dupes_mod = @import("analysis/dupes.zig");
 const growth_mod = @import("analysis/growth.zig");
+const pr_mod = @import("analysis/pr.zig");
 
 const ExitCode = u8;
 pub const exit_success: ExitCode = 0;
@@ -85,6 +86,7 @@ comptime {
     _ = @import("analysis/scan.zig");
     _ = @import("analysis/dupes.zig");
     _ = @import("analysis/growth.zig");
+    _ = @import("analysis/pr.zig");
     _ = @import("platform/mmap.zig");
     _ = @import("platform/filesystem.zig");
 }
@@ -103,7 +105,6 @@ pub fn main(init: std.process.Init) !void {
 
     const allocator = init.arena.allocator();
     const argv = try init.minimal.args.toSlice(allocator);
-    
 
     const opts = args_mod.parse(argv[1..]) catch {
         try errw.writeAll("error: invalid arguments\n\n");
@@ -172,7 +173,7 @@ fn run(io: std.Io, allocator: std.mem.Allocator, w: *std.Io.Writer, errw: *std.I
 
     // `changed` resolves only a handful of objects; every other command
     // enumerates the object database, so build the full index up front.
-    if (opts.command != .changed) {
+    if (opts.command != .changed and opts.command != .pr) {
         store.ensureIndexed() catch |err| switch (err) {
             error.OutOfMemory, error.SystemResources => return fail(errw, exit_general, "error: out of memory"),
             error.UnsupportedFormat => return fail(errw, exit_unsupported, "error: unsupported Git format"),
@@ -190,6 +191,62 @@ fn run(io: std.Io, allocator: std.mem.Allocator, w: *std.Io.Writer, errw: *std.I
     }
 
     switch (opts.command) {
+        .pr => {
+            if (opts.input_file) |input_file| {
+                const data = std.Io.Dir.cwd().readFileAlloc(io, input_file, allocator, std.Io.Limit.limited(32 * 1024 * 1024)) catch return fail(errw, exit_general, "error: cannot read PR input file");
+                defer allocator.free(data);
+                var lines = std.mem.splitScalar(u8, data, '\n');
+                var line_number: usize = 0;
+                var over_limit = false;
+                while (lines.next()) |raw_line| {
+                    line_number += 1;
+                    const line = std.mem.trim(u8, raw_line, "\r ");
+                    if (line.len == 0 or line[0] == '#') continue;
+                    var cols = std.mem.splitScalar(u8, line, '\t');
+                    const id = cols.next() orelse unreachable;
+                    const merged_at = cols.next() orelse return fail(errw, exit_invalid_args, "error: PR input needs five tab-separated columns");
+                    const stage = cols.next() orelse return fail(errw, exit_invalid_args, "error: PR input needs five tab-separated columns");
+                    const base_name = cols.next() orelse return fail(errw, exit_invalid_args, "error: PR input needs five tab-separated columns");
+                    const to_name = cols.next() orelse return fail(errw, exit_invalid_args, "error: PR input needs five tab-separated columns");
+                    if (cols.next() != null or id.len == 0 or merged_at.len == 0 or base_name.len == 0 or to_name.len == 0) return fail(errw, exit_invalid_args, "error: invalid PR input record");
+                    if (line_number == 1 and std.mem.eql(u8, id, "pr_id")) continue;
+                    if (!std.mem.eql(u8, stage, "pre") and !std.mem.eql(u8, stage, "post")) return fail(errw, exit_invalid_args, "error: PR stage must be pre or post");
+                    const base_commit = revision.resolve(&store, &refs, base_name, allocator) catch return fail(errw, exit_invalid_args, "error: cannot resolve PR input base revision");
+                    const to_commit = revision.resolve(&store, &refs, to_name, allocator) catch return fail(errw, exit_invalid_args, "error: cannot resolve PR input target revision");
+                    var report = pr_mod.build(&store, std.heap.page_allocator, base_name, base_commit, to_name, to_commit) catch |err| return reportAnalysisError(errw, err);
+                    defer report.deinit(std.heap.page_allocator);
+                    report.id = id;
+                    report.merged_at = merged_at;
+                    report.stage = stage;
+                    var jw: json.JsonWriter = .{ .w = w, .compact = true };
+                    json.printPr(&jw, &report) catch return exit_general;
+                    w.writeByte('\n') catch return exit_general;
+                    if (opts.max_points) |limit| if (report.total_points > limit) {
+                        over_limit = true;
+                    };
+                }
+                if (over_limit) return exit_threshold;
+            } else {
+                // Prefer the fetched target branch, then a local main branch.
+                const base_name: []const u8 = opts.base_ref orelse blk: {
+                    if (revision.resolve(&store, &refs, "origin/main", allocator)) |_| break :blk "origin/main" else |_| {}
+                    break :blk "main";
+                };
+                const to_name = opts.to_ref orelse "HEAD";
+                const base_commit = revision.resolve(&store, &refs, base_name, allocator) catch return fail(errw, exit_invalid_args, "error: cannot resolve base revision");
+                const to_commit = revision.resolve(&store, &refs, to_name, allocator) catch return fail(errw, exit_invalid_args, "error: cannot resolve target revision");
+                var report = pr_mod.build(&store, std.heap.page_allocator, base_name, base_commit, to_name, to_commit) catch |err| return reportAnalysisError(errw, err);
+                defer report.deinit(std.heap.page_allocator);
+                if (opts.json) {
+                    var jw: json.JsonWriter = .{ .w = w, .compact = true };
+                    json.printPr(&jw, &report) catch return exit_general;
+                    w.writeByte('\n') catch return exit_general;
+                } else {
+                    output.printPr(w, &report) catch return exit_general;
+                }
+                if (opts.max_points) |limit| if (report.total_points > limit) return exit_threshold;
+            }
+        },
         .summary => {
             const s = summary.build(allocator, &repo, &store, &refs) catch |err| {
                 return reportAnalysisError(errw, err);

@@ -10,6 +10,89 @@ const changed_mod = @import("../analysis/changed.zig");
 const check_mod = @import("../analysis/check.zig");
 const dupes_mod = @import("../analysis/dupes.zig");
 const growth_mod = @import("../analysis/growth.zig");
+const pr_mod = @import("../analysis/pr.zig");
+
+pub fn printPr(jw: *JsonWriter, r: *const pr_mod.Report) WriteError!void {
+    try jw.beginObject();
+    try jw.field("score_version");
+    try jw.writeString(pr_mod.Report.score_version);
+    if (r.id) |id| {
+        try jw.field("pr_id");
+        try jw.writeString(id);
+    }
+    if (r.merged_at) |merged_at| {
+        try jw.field("merged_at");
+        try jw.writeString(merged_at);
+    }
+    if (r.stage) |stage| {
+        try jw.field("stage");
+        try jw.writeString(stage);
+    }
+    try jw.field("base");
+    try jw.writeString(r.base);
+    try jw.field("to");
+    try jw.writeString(r.to);
+    var base_hex: [64]u8 = undefined;
+    var to_hex: [64]u8 = undefined;
+    try jw.field("base_commit");
+    try jw.writeString(r.base_commit.hex(&base_hex));
+    try jw.field("to_commit");
+    try jw.writeString(r.to_commit.hex(&to_hex));
+    try jw.field("work_points");
+    try jw.writeU64(r.work_points);
+    try jw.field("complexity_points");
+    try jw.writeU64(r.complexity_points);
+    try jw.field("total_points");
+    try jw.writeU64(r.total_points);
+    try jw.field("changed_files");
+    try jw.writeU64(r.files);
+    try jw.field("added_lines");
+    try jw.writeU64(r.added_lines);
+    try jw.field("removed_lines");
+    try jw.writeU64(r.removed_lines);
+    try jw.field("added_branches");
+    try jw.writeU64(r.added_branches);
+    try jw.field("excluded_files");
+    try jw.writeU64(r.excluded_files);
+    try jw.field("binary_files");
+    try jw.writeU64(r.binary_files);
+    try jw.field("dimensions");
+    try jw.beginObject();
+    try jw.field("internal_imports");
+    try jw.writeU64(r.internal_imports);
+    try jw.field("external_integrations");
+    try jw.writeU64(r.external_integrations);
+    try jw.field("dependency_manifests_changed");
+    try jw.writeU64(r.dependency_changes);
+    try jw.field("new_ui_components");
+    try jw.writeU64(r.new_ui_components);
+    try jw.field("changed_shared_ui_components");
+    try jw.writeU64(r.changed_shared_ui_components);
+    try jw.field("reused_ui_components");
+    try jw.writeU64(r.reused_ui_components);
+    try jw.field("crypto_signals");
+    try jw.writeU64(r.crypto_signals);
+    try jw.field("algorithm_signals");
+    try jw.writeU64(r.algorithm_signals);
+    try jw.endObject();
+    try jw.field("semantic_complexity");
+    try jw.writeString("unknown");
+    try jw.field("evidence");
+    try jw.beginArray();
+    for (r.evidence) |item| {
+        try jw.element();
+        try jw.beginObject();
+        try jw.field("dimension");
+        try jw.writeString(item.dimension);
+        try jw.field("path");
+        try jw.writeString(item.path);
+        try jw.field("detail");
+        try jw.writeString(item.detail);
+        try jw.endObject();
+    }
+    try jw.endArray();
+    try jw.endObject();
+}
 const object_id_mod = @import("../git/object_id.zig");
 
 pub const WriteError = std.Io.Writer.Error;
@@ -17,6 +100,7 @@ pub const WriteError = std.Io.Writer.Error;
 /// Minimal JSON writer over std.Io.Writer with indentation.
 pub const JsonWriter = struct {
     w: *std.Io.Writer,
+    compact: bool = false,
     depth: usize = 0,
     first: [16]bool = [_]bool{true} ** 16,
 
@@ -47,10 +131,11 @@ pub const JsonWriter = struct {
     }
 
     fn newline(self: *JsonWriter) WriteError!void {
-        try self.w.writeByte('\n');
+        if (!self.compact) try self.w.writeByte('\n');
     }
 
     fn indent(self: *JsonWriter) WriteError!void {
+        if (self.compact) return;
         var i: usize = 0;
         while (i < self.depth) : (i += 1) try self.w.writeAll("  ");
     }
@@ -67,7 +152,14 @@ pub const JsonWriter = struct {
     pub fn field(self: *JsonWriter, name: []const u8) WriteError!void {
         try self.beforeField();
         try self.writeString(name);
-        try self.w.writeAll(": ");
+        try self.w.writeAll(if (self.compact) ":" else ": ");
+    }
+
+    pub fn element(self: *JsonWriter) WriteError!void {
+        if (!self.first[self.depth]) try self.w.writeByte(',');
+        try self.newline();
+        try self.indent();
+        self.first[self.depth] = false;
     }
 
     pub fn writeString(self: *JsonWriter, s: []const u8) WriteError!void {
