@@ -271,6 +271,9 @@ its repository, calculate both repository snapshots at the PR base and tip;
 the change in repo points and its percentage of the base are more meaningful
 than dividing PR work points by the repository's stock score.
 
+For a copyable PR and main-branch workflow, see the
+[GitHub Actions complexity guide](docs/complexity-in-github-actions.md).
+
 ### PR complexity (experimental)
 
 `git-weight pr` compares two commit trees directly, without GitHub access or a `git` subprocess. By default, the base is `origin/main` if present, otherwise `main`; the target is `HEAD`. Thus on a checked-out PR branch, `git-weight pr --json` gives a quick score. It does **not** calculate the merge base: if main advanced after the PR branched, pass the actual merge-base SHA with `--base` to avoid counting unrelated main changes. Run it before merge against the saved base and PR-tip SHAs; run it again after merge against the target branch's pre-merge SHA and the landed commit. Save those SHAs in CI because squash/rebase can replace PR commits and deleted branch objects may later be pruned.
