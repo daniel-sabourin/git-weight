@@ -11,6 +11,62 @@ const check_mod = @import("../analysis/check.zig");
 const dupes_mod = @import("../analysis/dupes.zig");
 const growth_mod = @import("../analysis/growth.zig");
 const pr_mod = @import("../analysis/pr.zig");
+const repo_complexity = @import("../analysis/repo_complexity.zig");
+
+pub fn printRepoComplexity(jw: *JsonWriter, r: *const repo_complexity.Report) WriteError!void {
+    try jw.beginObject();
+    try jw.field("score_version");
+    try jw.writeString(repo_complexity.Report.score_version);
+    try jw.field("revision");
+    try jw.writeString(r.revision);
+    var commit_hex: [64]u8 = undefined;
+    try jw.field("commit");
+    try jw.writeString(r.commit.hex(&commit_hex));
+    try jw.field("committed_at_unix");
+    if (r.committed_at) |timestamp| {
+        try jw.w.print("{d}", .{timestamp});
+    } else {
+        try jw.w.writeAll("null");
+    }
+    try jw.field("total_points");
+    try jw.writeU64(r.total_points);
+    try jw.field("size_points");
+    try jw.writeU64(r.size_points);
+    try jw.field("structural_points");
+    try jw.writeU64(r.structural_points);
+    try jw.field("points_per_kloc");
+    try jw.writeU64(r.points_per_kloc);
+    try jw.field("structural_points_per_kloc");
+    try jw.writeU64(r.structural_points_per_kloc);
+    try jw.field("source_files");
+    try jw.writeU64(r.source_files);
+    try jw.field("source_lines");
+    try jw.writeU64(r.source_lines);
+    try jw.field("dimensions");
+    try jw.beginObject();
+    try jw.field("branch_lines");
+    try jw.writeU64(r.branch_lines);
+    try jw.field("internal_imports");
+    try jw.writeU64(r.internal_imports);
+    try jw.field("external_host_references");
+    try jw.writeU64(r.external_host_references);
+    try jw.field("dependency_manifests");
+    try jw.writeU64(r.dependency_manifests);
+    try jw.field("ui_components");
+    try jw.writeU64(r.ui_components);
+    try jw.field("crypto_files");
+    try jw.writeU64(r.crypto_files);
+    try jw.field("algorithm_files");
+    try jw.writeU64(r.algorithm_files);
+    try jw.endObject();
+    try jw.field("excluded_files");
+    try jw.writeU64(r.excluded_files);
+    try jw.field("binary_files");
+    try jw.writeU64(r.binary_files);
+    try jw.field("semantic_complexity");
+    try jw.writeString("unknown");
+    try jw.endObject();
+}
 
 pub fn printPr(jw: *JsonWriter, r: *const pr_mod.Report) WriteError!void {
     try jw.beginObject();

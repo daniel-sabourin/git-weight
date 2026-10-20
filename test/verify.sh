@@ -1129,4 +1129,45 @@ if ! printf '%s\n' "$PACKS_HUMAN" | grep -q "hint: "; then
 fi
 echo "ok: packs human repack hint"
 
+# --- fixture: repository complexity is a snapshot, not summed PR churn ----
+REPO="$FIXTURES/repo-complexity"
+mkdir -p "$REPO/src" "$REPO/vendor"
+cd "$REPO"
+git init -q -b main
+git config user.email test@example.com
+git config user.name Test
+cat > src/app.js <<'JSEOF'
+import { helper } from './helper';
+if (helper) {
+  fetch('https://partner.example/v1');
+}
+crypto.encrypt(helper);
+JSEOF
+echo 'if (ignored) {}' > vendor/ignored.js
+echo 'module example.com/project' > go.mod
+echo 'import "example.com/project/internal/api"' > src/main.go
+git add -A && git commit -qm 'add source'
+FIRST=$(git rev-parse HEAD)
+"$GW" complexity --rev "$FIRST" --json > "$FIXTURES/repo-first.json"
+git rm -q src/app.js src/main.go go.mod
+git commit -qm 'remove source'
+mkdir -p src
+echo 'if (not committed) {}' > src/worktree.js
+"$GW" complexity --json > "$FIXTURES/repo-current.json"
+python3 - "$FIXTURES/repo-first.json" "$FIXTURES/repo-current.json" "$FIRST" <<'PYEOF'
+import json, sys
+before, after = (json.load(open(path)) for path in sys.argv[1:3])
+assert before['score_version'] == after['score_version'] == 'complexity-1'
+assert before['commit'] == sys.argv[3]
+assert before['source_files'] == 2 and before['source_lines'] == 6
+assert before['dimensions']['branch_lines'] == 1
+assert before['dimensions']['internal_imports'] == 2
+assert before['dimensions']['external_host_references'] == 1
+assert before['dimensions']['crypto_files'] == 1
+assert before['dimensions']['dependency_manifests'] == 1
+assert before['total_points'] > 0
+assert after['source_files'] == after['source_lines'] == after['total_points'] == 0
+print('ok: repo score follows committed active source, not history or worktree')
+PYEOF
+
 echo "ALL INTEGRATION CHECKS PASSED"
