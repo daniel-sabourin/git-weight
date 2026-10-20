@@ -15,6 +15,7 @@ pub const Report = struct {
     size_points: u64 = 0,
     structural_points: u64 = 0,
     points_per_kloc: u64 = 0,
+    structural_points_per_kloc: u64 = 0,
     source_files: u64 = 0,
     source_lines: u64 = 0,
     branch_lines: u64 = 0,
@@ -173,7 +174,10 @@ pub fn build(store: *const objects.ObjectStore, allocator: std.mem.Allocator, na
         4 * report.dependency_manifests + 6 * report.ui_components +
         10 * report.crypto_files + 8 * report.algorithm_files;
     report.total_points = report.size_points + report.structural_points;
-    if (report.source_lines > 0) report.points_per_kloc = (report.total_points * 1000 + report.source_lines / 2) / report.source_lines;
+    if (report.source_lines > 0) {
+        report.points_per_kloc = (report.total_points * 1000 + report.source_lines / 2) / report.source_lines;
+        report.structural_points_per_kloc = (report.structural_points * 1000 + report.source_lines / 2) / report.source_lines;
+    }
     return report;
 }
 

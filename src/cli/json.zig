@@ -36,6 +36,8 @@ pub fn printRepoComplexity(jw: *JsonWriter, r: *const repo_complexity.Report) Wr
     try jw.writeU64(r.structural_points);
     try jw.field("points_per_kloc");
     try jw.writeU64(r.points_per_kloc);
+    try jw.field("structural_points_per_kloc");
+    try jw.writeU64(r.structural_points_per_kloc);
     try jw.field("source_files");
     try jw.writeU64(r.source_files);
     try jw.field("source_lines");

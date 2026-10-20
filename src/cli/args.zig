@@ -286,6 +286,7 @@ pub fn parse(argv: []const []const u8) ParseError!Options {
     if (opts.current_only and opts.historical_only) return error.InvalidArguments;
     if (opts.max_points != null and opts.command != .pr) return error.InvalidArguments;
     if (opts.rev_ref != null and opts.command != .repo) return error.InvalidArguments;
+    if (opts.command == .repo and (opts.base_ref != null or opts.to_ref != null)) return error.InvalidArguments;
     if (opts.input_file != null and (opts.command != .pr or !opts.json or opts.base_ref != null or opts.to_ref != null)) return error.InvalidArguments;
     return opts;
 }

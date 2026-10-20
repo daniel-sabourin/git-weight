@@ -248,10 +248,11 @@ structural_points = 4 × active branch lines + 3 × active source files
                   + 10 × files with crypto keywords + 8 × files with algorithm keywords
 total_points = size_points + structural_points
 points_per_kloc = total_points / active source lines × 1,000 (rounded)
+structural_points_per_kloc = structural_points / active source lines × 1,000 (rounded)
 ```
 
 JSON includes the resolved commit and commit timestamp, total and dimension
-counts, and score version. Thus a deleted file stops contributing to future
+counts, both densities, and score version. Thus a deleted file stops contributing to future
 snapshots, even though its historical Git objects remain. Compare snapshots
 only with the same score version; show the source-line count and dimension
 breakdown alongside totals when comparing different repositories. This is a
