@@ -7,7 +7,7 @@ const tree_mod = @import("../git/tree.zig");
 /// A stock measure: only blobs reachable from one commit's tree contribute.
 /// This is deliberately distinct from the PR report's churn/work measure.
 pub const Report = struct {
-    pub const score_version = "repo-1";
+    pub const score_version = "complexity-1";
     revision: []const u8,
     commit: object_id.ObjectId,
     committed_at: ?i64,

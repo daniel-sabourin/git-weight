@@ -84,7 +84,7 @@ Commands:
   dupes        Duplicate content: identical blobs at multiple paths
   growth       Repository growth by calendar month
   pr           Score changed source between two commits (PR pre/post merge)
-  repo         Score active source complexity at a commit (snapshot)
+  complexity   Score active source complexity at a commit (snapshot)
 
 Options:
   --json             Machine-readable JSON output
@@ -94,7 +94,7 @@ Options:
   --threads N        Worker thread count (default: CPU count)
   --base REF         Base revision for 'changed' (default HEAD~1)
   --to REF           Target revision for 'changed' (default HEAD)
-  --rev REF          Snapshot revision for 'repo' (default HEAD)
+  --rev REF          Snapshot revision for 'complexity' (default HEAD)
   --exit-code        For 'changed': exit 1 when changed, 0 when unchanged
   --max-size SIZE    For 'check': fail if total .git size exceeds SIZE
   --max-historical SIZE  For 'check': fail if historical deleted bytes exceed SIZE
@@ -227,15 +227,15 @@ fi
 
 ### Repository complexity (experimental)
 
-`git-weight repo` scores the **active source tree at one commit**, not all code
+`git-weight complexity` scores the **active source tree at one commit**, not all code
 ever committed. Use `--rev` with a commit or tag to compare snapshots over time:
 
 ```sh
-git-weight repo --json
-git-weight repo --rev v0.5.0 --json
+git-weight complexity --json
+git-weight complexity --rev v0.5.0 --json
 ```
 
-The independent `repo-1` score is a stock measure, separate from the PR
+The independent `complexity-1` score is a stock measure, separate from the PR
 change/work score. It uses the same supported source extensions and
 generated/vendor exclusions as `pr`:
 
@@ -265,7 +265,7 @@ The analysis currently counts nonblank lines, including comments, and has
 limited language coverage. `semantic_complexity` is therefore `unknown`.
 
 The PR score stays unchanged. Its change points represent work/churn; the
-difference between two `repo` snapshots is *net retained complexity*, which
+difference between two `complexity` snapshots is *net retained complexity*, which
 can decrease after a substantial simplifying refactor. If comparing a PR to
 its repository, calculate both repository snapshots at the PR base and tip;
 the change in repo points and its percentage of the base are more meaningful

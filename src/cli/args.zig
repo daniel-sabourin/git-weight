@@ -15,7 +15,7 @@ pub const Command = enum {
     dupes,
     growth,
     pr,
-    repo,
+    complexity,
 };
 
 pub const ParseError = error{
@@ -35,7 +35,7 @@ pub const Options = struct {
     base_ref: ?[]const u8 = null,
     /// Target revision for `changed` (default HEAD).
     to_ref: ?[]const u8 = null,
-    /// Snapshot revision for `repo` (default HEAD).
+    /// Snapshot revision for `complexity` (default HEAD).
     rev_ref: ?[]const u8 = null,
     /// TSV records for historical PR scoring.
     input_file: ?[]const u8 = null,
@@ -87,14 +87,14 @@ pub const usage_text =
     \\  dupes        Duplicate content: identical blobs at multiple paths
     \\  growth       Repository growth by calendar month
     \\  pr           Score changed source between two commits (PR pre/post merge)
-    \\  repo         Score active source complexity at a commit (snapshot)
+    \\  complexity   Score active source complexity at a commit (snapshot)
     \\
     \\Options:
     \\  --json             Machine-readable JSON output
     \\  --limit N          Maximum entries to list (default 20; applies to largest/refs/dupes)
     \\  --base REF         Base revision ('pr': origin/main then main; 'changed': HEAD~1)
     \\  --to REF           Target revision for 'changed' or 'pr' (default HEAD)
-    \\  --rev REF          Snapshot revision for 'repo' (default HEAD)
+    \\  --rev REF          Snapshot revision for 'complexity' (default HEAD)
     \\  --exit-code        For 'changed': exit 1 when changed, 0 when unchanged
     \\  --min-size SIZE    Only include blobs at least SIZE (e.g. 10MB, 500KiB)
     \\  --months N         For 'growth': show only the last N month buckets
@@ -285,8 +285,8 @@ pub fn parse(argv: []const []const u8) ParseError!Options {
         return error.InvalidArguments;
     if (opts.current_only and opts.historical_only) return error.InvalidArguments;
     if (opts.max_points != null and opts.command != .pr) return error.InvalidArguments;
-    if (opts.rev_ref != null and opts.command != .repo) return error.InvalidArguments;
-    if (opts.command == .repo and (opts.base_ref != null or opts.to_ref != null)) return error.InvalidArguments;
+    if (opts.rev_ref != null and opts.command != .complexity) return error.InvalidArguments;
+    if (opts.command == .complexity and (opts.base_ref != null or opts.to_ref != null)) return error.InvalidArguments;
     if (opts.input_file != null and (opts.command != .pr or !opts.json or opts.base_ref != null or opts.to_ref != null)) return error.InvalidArguments;
     return opts;
 }

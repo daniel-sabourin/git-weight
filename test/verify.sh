@@ -1148,16 +1148,16 @@ echo 'module example.com/project' > go.mod
 echo 'import "example.com/project/internal/api"' > src/main.go
 git add -A && git commit -qm 'add source'
 FIRST=$(git rev-parse HEAD)
-"$GW" repo --rev "$FIRST" --json > "$FIXTURES/repo-first.json"
+"$GW" complexity --rev "$FIRST" --json > "$FIXTURES/repo-first.json"
 git rm -q src/app.js src/main.go go.mod
 git commit -qm 'remove source'
 mkdir -p src
 echo 'if (not committed) {}' > src/worktree.js
-"$GW" repo --json > "$FIXTURES/repo-current.json"
+"$GW" complexity --json > "$FIXTURES/repo-current.json"
 python3 - "$FIXTURES/repo-first.json" "$FIXTURES/repo-current.json" "$FIRST" <<'PYEOF'
 import json, sys
 before, after = (json.load(open(path)) for path in sys.argv[1:3])
-assert before['score_version'] == after['score_version'] == 'repo-1'
+assert before['score_version'] == after['score_version'] == 'complexity-1'
 assert before['commit'] == sys.argv[3]
 assert before['source_files'] == 2 and before['source_lines'] == 6
 assert before['dimensions']['branch_lines'] == 1

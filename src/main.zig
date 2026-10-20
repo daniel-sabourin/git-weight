@@ -175,7 +175,7 @@ fn run(io: std.Io, allocator: std.mem.Allocator, w: *std.Io.Writer, errw: *std.I
 
     // `changed` resolves only a handful of objects; every other command
     // enumerates the object database, so build the full index up front.
-    if (opts.command != .changed and opts.command != .pr and opts.command != .repo) {
+    if (opts.command != .changed and opts.command != .pr and opts.command != .complexity) {
         store.ensureIndexed() catch |err| switch (err) {
             error.OutOfMemory, error.SystemResources => return fail(errw, exit_general, "error: out of memory"),
             error.UnsupportedFormat => return fail(errw, exit_unsupported, "error: unsupported Git format"),
@@ -193,7 +193,7 @@ fn run(io: std.Io, allocator: std.mem.Allocator, w: *std.Io.Writer, errw: *std.I
     }
 
     switch (opts.command) {
-        .repo => {
+        .complexity => {
             const name = opts.rev_ref orelse "HEAD";
             const commit = revision.resolve(&store, &refs, name, allocator) catch return fail(errw, exit_invalid_args, "error: cannot resolve snapshot revision");
             const report = repo_complexity.build(&store, std.heap.page_allocator, name, commit) catch |err| return reportAnalysisError(errw, err);
