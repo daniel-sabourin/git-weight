@@ -16,6 +16,21 @@ spec.loader.exec_module(release)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_next_version_uses_patch_after_latest_stable_tag(self):
+        source = '.{\n    .version = "0.7.0",\n}\n'
+        version, updated = release.next_version(source, ["v0.6.0", "v0.7.0", "v0.8.0-rc.1"])
+        self.assertEqual(version, "0.7.1")
+        self.assertIn('.version = "0.7.1",', updated)
+
+    def test_next_version_honors_explicit_source_bump(self):
+        source = '.version = "0.8.0",\n'
+        self.assertEqual(release.next_version(source, ["v0.7.0"])[0], "0.8.0")
+        self.assertEqual(release.next_version(source, ["v0.8.0"])[0], "0.8.1")
+
+    def test_next_version_rejects_missing_manifest_version(self):
+        with self.assertRaisesRegex(ValueError, "build.zig.zon"):
+            release.next_version(".name = .git_weight,", ["v0.7.0"])
+
     def test_tags(self):
         for tag in ("v0.4.0", "v1.2.3-rc.1", "v1.2.3-beta"):
             self.assertEqual(release.version_for(tag), tag[1:])
