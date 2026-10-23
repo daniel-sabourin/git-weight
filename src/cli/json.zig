@@ -34,10 +34,14 @@ pub fn printRepoComplexity(jw: *JsonWriter, r: *const repo_complexity.Report) Wr
     try jw.writeU64(r.size_points);
     try jw.field("structural_points");
     try jw.writeU64(r.structural_points);
+    try jw.field("domain_points");
+    try jw.writeU64(r.domain_points);
     try jw.field("points_per_kloc");
     try jw.writeU64(r.points_per_kloc);
     try jw.field("structural_points_per_kloc");
     try jw.writeU64(r.structural_points_per_kloc);
+    try jw.field("domain_points_per_kloc");
+    try jw.writeU64(r.domain_points_per_kloc);
     try jw.field("source_files");
     try jw.writeU64(r.source_files);
     try jw.field("source_lines");
@@ -58,6 +62,26 @@ pub fn printRepoComplexity(jw: *JsonWriter, r: *const repo_complexity.Report) Wr
     try jw.writeU64(r.crypto_files);
     try jw.field("algorithm_files");
     try jw.writeU64(r.algorithm_files);
+    try jw.field("terraform");
+    try jw.beginObject();
+    try jw.field("files");
+    try jw.writeU64(r.terraform_files);
+    inline for (.{ "terraform_resources", "terraform_data_sources", "terraform_modules", "terraform_providers", "terraform_dynamic_blocks", "terraform_iterations", "terraform_explicit_dependencies", "terraform_conditionals" }) |name| {
+        try jw.field(name);
+        try jw.writeU64(@field(r.domain_counts, name));
+    }
+    try jw.endObject();
+    try jw.field("sql");
+    try jw.beginObject();
+    try jw.field("files");
+    try jw.writeU64(r.sql_files);
+    try jw.field("migration_files");
+    try jw.writeU64(r.sql_migration_files);
+    inline for (.{ "sql_tables", "sql_foreign_references", "sql_indexes", "sql_views", "sql_procedures", "sql_functions", "sql_triggers", "sql_joins", "sql_ctes", "sql_unions" }) |name| {
+        try jw.field(name);
+        try jw.writeU64(@field(r.domain_counts, name));
+    }
+    try jw.endObject();
     try jw.endObject();
     try jw.field("excluded_files");
     try jw.writeU64(r.excluded_files);
@@ -65,6 +89,20 @@ pub fn printRepoComplexity(jw: *JsonWriter, r: *const repo_complexity.Report) Wr
     try jw.writeU64(r.binary_files);
     try jw.field("semantic_complexity");
     try jw.writeString("unknown");
+    if (r.comparison) |c| {
+        try jw.field("comparison");
+        try jw.beginObject();
+        try jw.field("base_revision");
+        try jw.writeString(c.base_revision);
+        var base_hex: [64]u8 = undefined;
+        try jw.field("base_commit");
+        try jw.writeString(c.base_commit.hex(&base_hex));
+        try jw.field("base_points");
+        try jw.writeU64(c.base_points);
+        try jw.field("delta_points");
+        try jw.w.print("{d}", .{c.delta_points});
+        try jw.endObject();
+    }
     try jw.endObject();
 }
 
@@ -98,6 +136,8 @@ pub fn printPr(jw: *JsonWriter, r: *const pr_mod.Report) WriteError!void {
     try jw.writeU64(r.work_points);
     try jw.field("complexity_points");
     try jw.writeU64(r.complexity_points);
+    try jw.field("domain_points");
+    try jw.writeU64(r.domain_points);
     try jw.field("total_points");
     try jw.writeU64(r.total_points);
     try jw.field("changed_files");
@@ -130,6 +170,20 @@ pub fn printPr(jw: *JsonWriter, r: *const pr_mod.Report) WriteError!void {
     try jw.writeU64(r.crypto_signals);
     try jw.field("algorithm_signals");
     try jw.writeU64(r.algorithm_signals);
+    try jw.field("terraform");
+    try jw.beginObject();
+    inline for (.{ "terraform_resources", "terraform_data_sources", "terraform_modules", "terraform_providers", "terraform_dynamic_blocks", "terraform_iterations", "terraform_explicit_dependencies", "terraform_conditionals" }) |name| {
+        try jw.field(name);
+        try jw.writeU64(@field(r.domain_counts, name));
+    }
+    try jw.endObject();
+    try jw.field("sql");
+    try jw.beginObject();
+    inline for (.{ "sql_tables", "sql_foreign_references", "sql_indexes", "sql_views", "sql_procedures", "sql_functions", "sql_triggers", "sql_joins", "sql_ctes", "sql_unions" }) |name| {
+        try jw.field(name);
+        try jw.writeU64(@field(r.domain_counts, name));
+    }
+    try jw.endObject();
     try jw.endObject();
     try jw.field("semantic_complexity");
     try jw.writeString("unknown");

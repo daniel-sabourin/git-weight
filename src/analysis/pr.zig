@@ -3,9 +3,10 @@ const object_id = @import("../git/object_id.zig");
 const objects = @import("objects.zig");
 const commit_mod = @import("../git/commit.zig");
 const tree_mod = @import("../git/tree.zig");
+const domain = @import("domain_complexity.zig");
 
 pub const Report = struct {
-    pub const score_version = "pr-1";
+    pub const score_version = "pr-2";
     pub const Evidence = struct { dimension: []const u8, path: []const u8, detail: []const u8 };
     base: []const u8,
     to: []const u8,
@@ -20,6 +21,7 @@ pub const Report = struct {
     added_branches: u64 = 0,
     work_points: u64 = 0,
     complexity_points: u64 = 0,
+    domain_points: u64 = 0,
     total_points: u64 = 0,
     internal_imports: u64 = 0,
     external_integrations: u64 = 0,
@@ -31,6 +33,7 @@ pub const Report = struct {
     algorithm_signals: u64 = 0,
     excluded_files: u64 = 0,
     binary_files: u64 = 0,
+    domain_counts: domain.Counts = .{},
     evidence: []Evidence = &.{},
 
     pub fn deinit(self: *Report, allocator: std.mem.Allocator) void {
@@ -42,6 +45,7 @@ pub const Report = struct {
 const FileMap = std.StringHashMapUnmanaged(object_id.ObjectId);
 
 fn source(path: []const u8) bool {
+    if (domain.isTerraform(path) or domain.isSql(path)) return true;
     const extensions = [_][]const u8{ ".zig", ".go", ".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".java", ".kt", ".swift", ".rs", ".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".rb", ".php", ".sh" };
     for (extensions) |ext| if (std.mem.endsWith(u8, path, ext)) return true;
     return false;
@@ -257,11 +261,21 @@ pub fn build(store: *const objects.ObjectStore, allocator: std.mem.Allocator, ba
             report.added_lines += counts.added;
             report.removed_lines += counts.removed;
             report.added_branches += counts.branches;
-            try scanSignals(a, allocator, old_text, new_text, path, &report, &evidence, &seen_imports, &seen_hosts);
+            if (domain.isTerraform(path) or domain.isSql(path)) {
+                const old_domain = try domain.scan(sa, path, old_text);
+                const new_domain = try domain.scan(sa, path, new_text);
+                const added_domain = domain.Counts.added(new_domain, old_domain);
+                report.domain_counts.add(added_domain);
+                if (added_domain.points() > 0) try addEvidence(allocator, &evidence, if (domain.isTerraform(path)) "terraform" else "sql", path, "new observable infrastructure/database constructs");
+            } else {
+                try scanSignals(a, allocator, old_text, new_text, path, &report, &evidence, &seen_imports, &seen_hosts);
+            }
         }
     }
     report.work_points = report.added_lines + report.removed_lines + 4 * report.added_branches + 3 * (report.files - report.excluded_files - report.binary_files);
     report.complexity_points = 6 * report.internal_imports + 12 * report.external_integrations + 4 * report.dependency_changes + 6 * report.new_ui_components + 6 * report.changed_shared_ui_components + 10 * report.crypto_signals + 8 * report.algorithm_signals;
+    report.domain_points = report.domain_counts.points();
+    report.complexity_points += report.domain_points;
     report.total_points = report.work_points + report.complexity_points;
     report.evidence = try evidence.toOwnedSlice(allocator);
     return report;
