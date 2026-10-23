@@ -3,19 +3,22 @@ const object_id = @import("../git/object_id.zig");
 const objects = @import("objects.zig");
 const commit_mod = @import("../git/commit.zig");
 const tree_mod = @import("../git/tree.zig");
+const domain = @import("domain_complexity.zig");
 
 /// A stock measure: only blobs reachable from one commit's tree contribute.
 /// This is deliberately distinct from the PR report's churn/work measure.
 pub const Report = struct {
-    pub const score_version = "complexity-1";
+    pub const score_version = "complexity-2";
     revision: []const u8,
     commit: object_id.ObjectId,
     committed_at: ?i64,
     total_points: u64 = 0,
     size_points: u64 = 0,
     structural_points: u64 = 0,
+    domain_points: u64 = 0,
     points_per_kloc: u64 = 0,
     structural_points_per_kloc: u64 = 0,
+    domain_points_per_kloc: u64 = 0,
     source_files: u64 = 0,
     source_lines: u64 = 0,
     branch_lines: u64 = 0,
@@ -27,9 +30,22 @@ pub const Report = struct {
     algorithm_files: u64 = 0,
     excluded_files: u64 = 0,
     binary_files: u64 = 0,
+    terraform_files: u64 = 0,
+    sql_files: u64 = 0,
+    sql_migration_files: u64 = 0,
+    domain_counts: domain.Counts = .{},
+    comparison: ?Comparison = null,
+
+    pub const Comparison = struct {
+        base_revision: []const u8,
+        base_commit: object_id.ObjectId,
+        base_points: u64,
+        delta_points: i128,
+    };
 };
 
 fn source(path: []const u8) bool {
+    if (domain.isTerraform(path) or domain.isSql(path)) return true;
     const extensions = [_][]const u8{ ".zig", ".go", ".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".java", ".kt", ".swift", ".rs", ".c", ".cc", ".cpp", ".h", ".hpp", ".cs", ".rb", ".php", ".sh" };
     for (extensions) |ext| if (std.mem.endsWith(u8, path, ext)) return true;
     return false;
@@ -69,11 +85,13 @@ fn scanFile(allocator: std.mem.Allocator, path: []const u8, text: []const u8, go
     var seen_hosts: std.StringHashMapUnmanaged(void) = .empty;
     var crypto = false;
     var algorithm = false;
+    const domain_file = domain.isTerraform(path) or domain.isSql(path);
     var lines = std.mem.splitScalar(u8, text, '\n');
     while (lines.next()) |line| {
         if (std.mem.trim(u8, line, " \t\r").len == 0) continue;
         report.source_lines += 1;
         if (branchLine(line)) report.branch_lines += 1;
+        if (domain_file) continue; // Domain-specific scanner owns these signals.
         const is_import = containsAny(line, &.{ "import ", "from ", "require(", "@import(", "#include " });
         const local_import = (is_import and containsAny(line, &.{ "./", "../", "@/", "crate::", "self::", "super::" })) or
             (std.mem.endsWith(u8, path, ".go") and go_module_prefix != null and std.mem.indexOf(u8, line, go_module_prefix.?) != null);
@@ -149,8 +167,14 @@ fn scanTree(store: *const objects.ObjectStore, allocator: std.mem.Allocator, tre
                     continue;
                 }
                 report.source_files += 1;
+                if (domain.isTerraform(path)) report.terraform_files += 1;
+                if (domain.isSql(path)) {
+                    report.sql_files += 1;
+                    if (std.mem.indexOf(u8, path, "migration") != null) report.sql_migration_files += 1;
+                }
                 if (uiComponent(path)) report.ui_components += 1;
                 try scanFile(allocator, path, blob.data, go_module_prefix, report);
+                report.domain_counts.add(try domain.scan(allocator, path, blob.data));
             },
             else => {},
         }
@@ -173,10 +197,12 @@ pub fn build(store: *const objects.ObjectStore, allocator: std.mem.Allocator, na
         6 * report.internal_imports + 12 * report.external_host_references +
         4 * report.dependency_manifests + 6 * report.ui_components +
         10 * report.crypto_files + 8 * report.algorithm_files;
-    report.total_points = report.size_points + report.structural_points;
+    report.domain_points = report.domain_counts.points();
+    report.total_points = report.size_points + report.structural_points + report.domain_points;
     if (report.source_lines > 0) {
         report.points_per_kloc = (report.total_points * 1000 + report.source_lines / 2) / report.source_lines;
         report.structural_points_per_kloc = (report.structural_points * 1000 + report.source_lines / 2) / report.source_lines;
+        report.domain_points_per_kloc = (report.domain_points * 1000 + report.source_lines / 2) / report.source_lines;
     }
     return report;
 }

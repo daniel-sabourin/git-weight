@@ -92,7 +92,7 @@ pub const usage_text =
     \\Options:
     \\  --json             Machine-readable JSON output
     \\  --limit N          Maximum entries to list (default 20; applies to largest/refs/dupes)
-    \\  --base REF         Base revision ('pr': origin/main then main; 'changed': HEAD~1)
+    \\  --base REF         Base revision ('pr': origin/main then main; 'changed': HEAD~1; 'complexity': comparison)
     \\  --to REF           Target revision for 'changed' or 'pr' (default HEAD)
     \\  --rev REF          Snapshot revision for 'complexity' (default HEAD)
     \\  --exit-code        For 'changed': exit 1 when changed, 0 when unchanged
@@ -286,7 +286,7 @@ pub fn parse(argv: []const []const u8) ParseError!Options {
     if (opts.current_only and opts.historical_only) return error.InvalidArguments;
     if (opts.max_points != null and opts.command != .pr) return error.InvalidArguments;
     if (opts.rev_ref != null and opts.command != .complexity) return error.InvalidArguments;
-    if (opts.command == .complexity and (opts.base_ref != null or opts.to_ref != null)) return error.InvalidArguments;
+    if (opts.command == .complexity and opts.to_ref != null) return error.InvalidArguments;
     if (opts.input_file != null and (opts.command != .pr or !opts.json or opts.base_ref != null or opts.to_ref != null)) return error.InvalidArguments;
     return opts;
 }
@@ -391,4 +391,12 @@ test "parse PR scoring and historical input" {
     try std.testing.expectEqualStrings("history.tsv", history.input_file.?);
     try std.testing.expectError(error.InvalidArguments, parse(&.{ "pr", "--input", "history.tsv" }));
     try std.testing.expectError(error.InvalidArguments, parse(&.{ "pr", "--input", "history.tsv", "--json", "--base", "main" }));
+}
+
+test "complexity accepts a comparison base but not a PR target" {
+    const opts = try parse(&.{ "complexity", "--base", "v1", "--rev", "HEAD", "--json" });
+    try std.testing.expectEqualStrings("v1", opts.base_ref.?);
+    try std.testing.expectEqualStrings("HEAD", opts.rev_ref.?);
+    try std.testing.expect(opts.json);
+    try std.testing.expectError(error.InvalidArguments, parse(&.{ "complexity", "--to", "HEAD" }));
 }

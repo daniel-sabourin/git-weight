@@ -16,12 +16,18 @@ const repo_complexity = @import("../analysis/repo_complexity.zig");
 pub fn printRepoComplexity(w: *std.Io.Writer, r: *const repo_complexity.Report) WriteError!void {
     var commit_hex: [64]u8 = undefined;
     try w.print("Repository complexity at {s} ({s})\n", .{ r.revision, r.commit.hex(&commit_hex) });
-    try w.print("Score {s}: {d} total = {d} size + {d} structural ({d} points/1,000 source lines)\n", .{ repo_complexity.Report.score_version, r.total_points, r.size_points, r.structural_points, r.points_per_kloc });
+    try w.print("Score {s}: {d} total = {d} size + {d} structural + {d} infrastructure/database ({d} points/1,000 source lines)\n", .{ repo_complexity.Report.score_version, r.total_points, r.size_points, r.structural_points, r.domain_points, r.points_per_kloc });
     try w.print("Structural density: {d} points/1,000 source lines\n", .{r.structural_points_per_kloc});
+    try w.print("Infrastructure/database density: {d} points/1,000 source lines\n", .{r.domain_points_per_kloc});
     try w.print("Active source: {d} files, {d} nonblank lines, {d} branch lines\n", .{ r.source_files, r.source_lines, r.branch_lines });
     try w.print("Coupling: {d} relative imports, {d} external host references; {d} dependency manifests\n", .{ r.internal_imports, r.external_host_references, r.dependency_manifests });
     try w.print("UI components: {d}; specialist signals: {d} crypto files, {d} algorithm files\n", .{ r.ui_components, r.crypto_files, r.algorithm_files });
+    try w.print("Terraform: {d} files, {d} resources, {d} data sources, {d} modules, {d} dynamic blocks\n", .{ r.terraform_files, r.domain_counts.terraform_resources, r.domain_counts.terraform_data_sources, r.domain_counts.terraform_modules, r.domain_counts.terraform_dynamic_blocks });
+    try w.print("SQL: {d} files ({d} migrations), {d} tables, {d} references, {d} views, {d} procedures/functions, {d} triggers\n", .{ r.sql_files, r.sql_migration_files, r.domain_counts.sql_tables, r.domain_counts.sql_foreign_references, r.domain_counts.sql_views, r.domain_counts.sql_procedures + r.domain_counts.sql_functions, r.domain_counts.sql_triggers });
     try w.print("Excluded files: {d}; binary files: {d}\n", .{ r.excluded_files, r.binary_files });
+    if (r.comparison) |c| {
+        try w.print("Net complexity vs {s}: {d} points ({d} -> {d}); PR work points are separate\n", .{ c.base_revision, c.delta_points, c.base_points, r.total_points });
+    }
 }
 
 pub fn printPr(w: *std.Io.Writer, r: *const pr_mod.Report) WriteError!void {
@@ -30,6 +36,7 @@ pub fn printPr(w: *std.Io.Writer, r: *const pr_mod.Report) WriteError!void {
     try w.print("Changed lines: +{d} -{d}; added branches: {d}; files: {d}\n", .{ r.added_lines, r.removed_lines, r.added_branches, r.files });
     try w.print("Reach: {d} internal imports, {d} external hosts; {d} dependency manifests\n", .{ r.internal_imports, r.external_integrations, r.dependency_changes });
     try w.print("UI: {d} new, {d} changed shared, {d} reused imports; specialist: {d} crypto, {d} algorithm signals\n", .{ r.new_ui_components, r.changed_shared_ui_components, r.reused_ui_components, r.crypto_signals, r.algorithm_signals });
+    try w.print("Infrastructure/database: {d} added construct points ({d} Terraform resources, {d} SQL tables, {d} SQL routines)\n", .{ r.domain_points, r.domain_counts.terraform_resources, r.domain_counts.sql_tables, r.domain_counts.sql_procedures + r.domain_counts.sql_functions });
     try w.print("Excluded files: {d}; binary files: {d}\n", .{ r.excluded_files, r.binary_files });
 }
 const object_id = @import("../git/object_id.zig");

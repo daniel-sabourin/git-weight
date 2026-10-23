@@ -92,7 +92,7 @@ Options:
   --min-size SIZE    Only include blobs at least SIZE (e.g. 10MB, 500KiB)
   --months N         For 'growth': show only the last N month buckets
   --threads N        Worker thread count (default: CPU count)
-  --base REF         Base revision for 'changed' (default HEAD~1)
+  --base REF         Base revision for 'changed' (HEAD~1), 'pr', or 'complexity' comparison
   --to REF           Target revision for 'changed' (default HEAD)
   --rev REF          Snapshot revision for 'complexity' (default HEAD)
   --exit-code        For 'changed': exit 1 when changed, 0 when unchanged
@@ -233,9 +233,10 @@ ever committed. Use `--rev` with a commit or tag to compare snapshots over time:
 ```sh
 git-weight complexity --json
 git-weight complexity --rev v0.5.0 --json
+git-weight complexity --base v0.5.0 --rev HEAD --json
 ```
 
-The independent `complexity-1` score is a stock measure, separate from the PR
+The independent `complexity-2` score is a stock measure, separate from the PR
 change/work score. It uses the same supported source extensions and
 generated/vendor exclusions as `pr`:
 
@@ -246,14 +247,24 @@ structural_points = 4 × active branch lines + 3 × active source files
                   + 12 × distinct URL hosts per file
                   + 4 × dependency manifests + 6 × UI component files
                   + 10 × files with crypto keywords + 8 × files with algorithm keywords
-total_points = size_points + structural_points
+domain_points = Terraform: 8 × resources + 6 × data sources + 10 × modules
+              + 6 × providers + 4 × dynamic blocks + 3 × iterations
+              + 5 × explicit dependencies + 3 × conditionals
+              + SQL: 8 × tables + 8 × foreign references + 4 × indexes
+              + 10 × views + 24 × procedures/functions + 20 × triggers
+              + 4 × joins + 5 × CTEs + 3 × unions
+total_points = size_points + structural_points + domain_points
 points_per_kloc = total_points / active source lines × 1,000 (rounded)
 structural_points_per_kloc = structural_points / active source lines × 1,000 (rounded)
+domain_points_per_kloc = domain_points / active source lines × 1,000 (rounded)
 ```
 
 JSON includes the resolved commit and commit timestamp, total and dimension
-counts, both densities, and score version. Thus a deleted file stops contributing to future
-snapshots, even though its historical Git objects remain. Compare snapshots
+counts, both densities, and score version. With `--base`, it also includes the
+base commit, base score, and a **signed** `comparison.delta_points`. Removing
+source or Terraform/SQL constructs can therefore produce a negative change.
+A deleted file stops contributing to future snapshots even though its historical
+Git objects remain. Compare snapshots
 only with the same score version; show the source-line count and dimension
 breakdown alongside totals when comparing different repositories. This is a
 heuristic inventory, **not** a quality grade: internal imports include relative
@@ -262,10 +273,16 @@ they are not a resolved dependency graph. Literal URL hosts are not confirmed ex
 partners; a manifest is not a count of dependencies; and keyword signals do
 not establish that cryptography or a novel algorithm is actually in use.
 The analysis currently counts nonblank lines, including comments, and has
-limited language coverage. `semantic_complexity` is therefore `unknown`.
+limited language coverage. Terraform `.tf` and SQL `.sql` files are included.
+Terraform blocks/expressions and SQL DDL/query constructs are lightweight
+static signals, not a Terraform plan or SQL parser. In particular, versioned
+SQL migration files may describe *historical operations*, not objects still
+present in a live database; `dimensions.sql.migration_files` exposes that
+count. Do not interpret a migration-heavy repository's score as a live schema
+inventory. `semantic_complexity` remains `unknown`.
 
-The PR score stays unchanged. Its change points represent work/churn; the
-difference between two `complexity` snapshots is *net retained complexity*, which
+The PR score remains a work/churn measure; the difference between two
+`complexity` snapshots is *net retained complexity*, which
 can decrease after a substantial simplifying refactor. If comparing a PR to
 its repository, calculate both repository snapshots at the PR base and tip;
 the change in repo points and its percentage of the base are more meaningful
@@ -292,10 +309,11 @@ complexity_points = 6 × new relative imports + 12 × new URL hosts
                   + 4 × changed dependency manifests
                   + 6 × new or changed shared UI components
                   + 10 × crypto signals + 8 × algorithm signals
+                  + added Terraform/SQL constructs at the domain weights above
 total_points = work_points + complexity_points
 ```
 
-The score is versioned (`pr-1`). `--json` writes one compact JSON object per invocation to stdout for line-oriented pipeline logging, including base/target commit hashes, dimensions, and up to 64 evidence entries. `--max-points N` exits 6 when *total_points* exceeds N. Source extensions are listed in `src/analysis/pr.zig`; generated/vendor/build paths and binary files are excluded. Component reuse is reported as context but adds no complexity points.
+The score is versioned (`pr-2`). `--json` writes one compact JSON object per invocation to stdout for line-oriented pipeline logging, including base/target commit hashes, dimensions, and up to 64 evidence entries. `--max-points N` exits 6 when *total_points* exceeds N. Source extensions are listed in `src/analysis/pr.zig`; generated/vendor/build paths and binary files are excluded. Component reuse is reported as context but adds no complexity points.
 
 For historical PRs, supply a UTF-8 tab-separated file with five columns (`pr_id`, `merged_at`, `stage`, `base`, `to`). `stage` is `pre` or `post`; `base` and `to` should be retained full commit SHAs. `merged_at` is an ISO-8601 timestamp supplied by the caller. The first header row is optional. Each record produces one JSON line; missing commits fail explicitly.
 
@@ -305,7 +323,7 @@ git-weight pr --input historical-prs.tsv --json > historical-scores.jsonl
 
 Git history does not reliably identify squash-merged PR numbers or reconstruct pruned branch tips; obtain the historical PR-to-commit mapping separately. Run all backfills with the same score version for comparable trend lines.
 
-This is an *uncalibrated change-complexity proxy*, not a measure of engineer productivity or semantic difficulty. Lines are compared as multisets: reordering does not add points, while rewritten lines count as removals plus additions. Internal reach currently means distinct new *relative import statements*, not a resolved call graph. External reach means literal new URL hosts, not verified partner integrations. A changed dependency manifest does not prove a dependency was added; UI component paths do not establish consumer reach. Crypto and algorithm signals are keyword heuristics. The report marks semantic complexity `unknown`; a reviewer should assess whether the observed complexity is justified. Calibrate weights against historical PRs before using thresholds as a merge gate. Files absent from the target tree (deletions) are counted; the score measures changed work, not net codebase complexity.
+This is an *uncalibrated change-complexity proxy*, not a measure of engineer productivity or semantic difficulty. Lines are compared as multisets: reordering does not add points, while rewritten lines count as removals plus additions. Internal reach currently means distinct new *relative import statements*, not a resolved call graph. External reach means literal new URL hosts, not verified partner integrations. A changed dependency manifest does not prove a dependency was added; UI component paths do not establish consumer reach. Crypto and algorithm signals are keyword heuristics. The report marks semantic complexity `unknown`; a reviewer should assess whether the observed complexity is justified. Calibrate weights against historical PRs before using thresholds as a merge gate. Files absent from the target tree (deletions) are counted as work, but added Terraform/SQL constructs alone add domain points; use `complexity --base <base> --rev <tip>` to see the signed net codebase effect.
 
 ### CI gating
 

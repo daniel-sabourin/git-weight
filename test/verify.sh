@@ -1157,7 +1157,7 @@ echo 'if (not committed) {}' > src/worktree.js
 python3 - "$FIXTURES/repo-first.json" "$FIXTURES/repo-current.json" "$FIRST" <<'PYEOF'
 import json, sys
 before, after = (json.load(open(path)) for path in sys.argv[1:3])
-assert before['score_version'] == after['score_version'] == 'complexity-1'
+assert before['score_version'] == after['score_version'] == 'complexity-2'
 assert before['commit'] == sys.argv[3]
 assert before['source_files'] == 2 and before['source_lines'] == 6
 assert before['dimensions']['branch_lines'] == 1
@@ -1168,6 +1168,55 @@ assert before['dimensions']['dependency_manifests'] == 1
 assert before['total_points'] > 0
 assert after['source_files'] == after['source_lines'] == after['total_points'] == 0
 print('ok: repo score follows committed active source, not history or worktree')
+PYEOF
+
+# Infrastructure/database additions contribute; removal reduces the same
+# repository stock score while still counting as PR work.
+REPO="$FIXTURES/infrastructure-sql-complexity"
+mkdir -p "$REPO/infra" "$REPO/db"
+cd "$REPO"
+git init -q -b main
+git config user.email test@example.com
+git config user.name Test
+git commit --allow-empty -qm 'empty baseline'
+EMPTY=$(git rev-parse HEAD)
+cat > infra/main.tf <<'TFEOF'
+resource "example_service" "app" {
+  count = 2
+  depends_on = [module.network]
+}
+module "network" {}
+TFEOF
+cat > db/schema.sql <<'SQLEOF'
+CREATE TABLE orders (customer_id INT REFERENCES customers(id));
+CREATE INDEX orders_customer_idx ON orders(customer_id);
+CREATE VIEW order_summary AS SELECT * FROM orders JOIN customers ON true;
+CREATE PROCEDURE refresh_summary() LANGUAGE SQL AS 'SELECT 1';
+SQLEOF
+git add -A && git commit -qm 'add infrastructure and schema'
+ADDED=$(git rev-parse HEAD)
+"$GW" complexity --base "$EMPTY" --json > "$FIXTURES/infra-added.json"
+"$GW" pr --base "$EMPTY" --to "$ADDED" --json > "$FIXTURES/infra-pr.json"
+git rm -q infra/main.tf db/schema.sql
+git commit -qm 'remove infrastructure and schema'
+"$GW" complexity --base "$ADDED" --json > "$FIXTURES/infra-removed.json"
+"$GW" pr --base "$ADDED" --to HEAD --json > "$FIXTURES/removal-pr.json"
+python3 - "$FIXTURES/infra-added.json" "$FIXTURES/infra-removed.json" "$FIXTURES/infra-pr.json" "$FIXTURES/removal-pr.json" <<'PYEOF'
+import json, sys
+added, removed, pr_added, pr_removed = (json.load(open(p)) for p in sys.argv[1:])
+assert added['score_version'] == removed['score_version'] == 'complexity-2'
+assert added['comparison']['base_points'] == 0
+assert added['comparison']['delta_points'] == added['total_points'] > 0
+assert added['dimensions']['terraform']['terraform_resources'] == 1
+assert added['dimensions']['terraform']['terraform_modules'] == 1
+assert added['dimensions']['sql']['sql_tables'] == 1
+assert added['dimensions']['sql']['sql_foreign_references'] == 1
+assert added['dimensions']['sql']['sql_procedures'] == 1
+assert pr_added['score_version'] == 'pr-2' and pr_added['domain_points'] > 0
+assert pr_removed['work_points'] > 0 and pr_removed['domain_points'] == 0
+assert removed['total_points'] == 0
+assert removed['comparison']['delta_points'] == -added['total_points']
+print('ok: Terraform/SQL are scored and removals reduce repository complexity')
 PYEOF
 
 # HEAD can point to a branch late in a packed-refs file larger than 4 KiB.

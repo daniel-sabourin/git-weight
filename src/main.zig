@@ -196,7 +196,17 @@ fn run(io: std.Io, allocator: std.mem.Allocator, w: *std.Io.Writer, errw: *std.I
         .complexity => {
             const name = opts.rev_ref orelse "HEAD";
             const commit = revision.resolve(&store, &refs, name, allocator) catch return fail(errw, exit_invalid_args, "error: cannot resolve snapshot revision");
-            const report = repo_complexity.build(&store, std.heap.page_allocator, name, commit) catch |err| return reportAnalysisError(errw, err);
+            var report = repo_complexity.build(&store, std.heap.page_allocator, name, commit) catch |err| return reportAnalysisError(errw, err);
+            if (opts.base_ref) |base_name| {
+                const base_commit = revision.resolve(&store, &refs, base_name, allocator) catch return fail(errw, exit_invalid_args, "error: cannot resolve comparison base revision");
+                const base = repo_complexity.build(&store, std.heap.page_allocator, base_name, base_commit) catch |err| return reportAnalysisError(errw, err);
+                report.comparison = .{
+                    .base_revision = base_name,
+                    .base_commit = base_commit,
+                    .base_points = base.total_points,
+                    .delta_points = @as(i128, @intCast(report.total_points)) - @as(i128, @intCast(base.total_points)),
+                };
+            }
             if (opts.json) {
                 var jw: json.JsonWriter = .{ .w = w, .compact = true };
                 json.printRepoComplexity(&jw, &report) catch return exit_general;
